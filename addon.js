@@ -1,0 +1,151 @@
+const { addonBuilder, getRouter } = require("stremio-addon-sdk");
+const fetch = require("node-fetch");
+const express = require("express");
+
+const API_BASE = "https://api.ppv.st/api";
+
+const manifest = {
+  id: "org.ppvst.sports",
+  version: "1.0.0",
+  name: "PPV Sports Live",
+  description: "Live sports streams and scheduled events provided by PPV.ST",
+  resources: ["catalog", "meta", "stream"],
+  types: ["tv"],
+  catalogs: [
+    {
+      type: "tv",
+      id: "ppv_sports",
+      name: "PPV Sports"
+    }
+  ]
+};
+
+const builder = new addonBuilder(manifest);
+
+async function fetchStreams() {
+  try {
+    const res = await fetch(`${API_BASE}/streams`);
+    const data = await res.json();
+    if (data && data.success && Array.isArray(data.streams)) {
+      return data.streams;
+    }
+  } catch (err) {
+    console.error("Error fetching streams:", err);
+  }
+  return [];
+}
+
+builder.defineCatalogHandler(async ({ type, id }) => {
+  if (type !== "tv" || id !== "ppv_sports") return { metas: [] };
+
+  const categories = await fetchStreams();
+  const metas = [];
+
+  for (const cat of categories) {
+    if (Array.isArray(cat.streams)) {
+      for (const item of cat.streams) {
+        metas.push({
+          id: `ppv_${item.id}`,
+          type: "tv",
+          name: item.name || "Live Match",
+          poster: item.poster || "",
+          description: `Category: ${cat.category} | Broadcaster: ${item.tag || "N/A"}`
+        });
+      }
+    }
+  }
+
+  return { metas };
+});
+
+builder.defineMetaHandler(async ({ type, id }) => {
+  if (type !== "tv" || !id.startsWith("ppv_")) return { meta: null };
+
+  const streamId = parseInt(id.replace("ppv_", ""), 10);
+  const categories = await fetchStreams();
+
+  let foundItem = null;
+  let foundCategory = "";
+
+  for (const cat of categories) {
+    if (Array.isArray(cat.streams)) {
+      const match = cat.streams.find((s) => s.id === streamId);
+      if (match) {
+        foundItem = match;
+        foundCategory = cat.category;
+        break;
+      }
+    }
+  }
+
+  if (!foundItem) return { meta: null };
+
+  return {
+    meta: {
+      id: id,
+      type: "tv",
+      name: foundItem.name,
+      poster: foundItem.poster,
+      description: `Category: ${foundCategory}\nSource: ${foundItem.tag || "Live Broadcast"}\nURI: ${foundItem.uri_name}`
+    }
+  };
+});
+
+builder.defineStreamHandler(async ({ type, id }) => {
+  if (type !== "tv" || !id.startsWith("ppv_")) return { streams: [] };
+
+  const streamId = parseInt(id.replace("ppv_", ""), 10);
+  const categories = await fetchStreams();
+
+  let foundItem = null;
+  for (const cat of categories) {
+    if (Array.isArray(cat.streams)) {
+      const match = cat.streams.find((s) => s.id === streamId);
+      if (match) {
+        foundItem = match;
+        break;
+      }
+    }
+  }
+
+  if (!foundItem) return { streams: [] };
+
+  const results = [];
+
+  if (foundItem.iframe) {
+    const match = foundItem.iframe.match(/src=["']([^"']+)["']/i);
+    if (match && match[1]) {
+      results.push({
+        title: `Watch Embed (${foundItem.tag || "Live"})`,
+        externalUrl: match[1]
+      });
+    }
+  }
+
+  if (foundItem.uri_name) {
+    results.push({
+      title: `Watch on Web (${foundItem.name})`,
+      externalUrl: `https://ppv.land/watch/${foundItem.uri_name}`
+    });
+  }
+
+  return { streams: results };
+});
+
+const app = express();
+const addonInterface = builder.getInterface();
+
+app.use("/", (req, res, next) => {
+  if (req.url === "/") {
+    res.redirect("/manifest.json");
+    return;
+  }
+  next();
+});
+
+app.use(getRouter(addonInterface));
+
+const PORT = process.env.PORT || 7000;
+app.listen(PORT, () => {
+  console.log(`Add-on running on port ${PORT}`);
+});
