@@ -328,20 +328,47 @@ builder.defineStreamHandler(async ({ type, id }) => {
   }
   if (!id.startsWith("ppv_")) return { streams: [] };
 
-  // PPV events keep their web links; they never go through the HLS relay.
   const ev = await findEvent(id);
   if (!ev || !ev.uri_name) return { streams: [] };
 
   const label = ev.source_tag || ev.tag || ev.name;
-  return {
-    streams: PPV_SITES.map((site, i) => ({
-      name: i === 0 ? "PPV" : "PPV Mirror",
-      title: `${site} • ${label}`,
-      externalUrl: `https://${site}/live/${ev.uri_name}`
-    }))
-  };
-});
+  const streams = [];
 
+  for (let i = 0; i < PPV_SITES.length; i++) {
+    const site = PPV_SITES[i];
+    const pageUrl = `https://${site}/live/${ev.uri_name}`;
+    const siteName = i === 0 ? "PPV" : "PPV Mirror";
+
+    // Attempt to automatically extract direct .m3u8 stream link from the page
+    const directM3u8 = await extractM3u8FromPage(pageUrl);
+
+    if (directM3u8) {
+      if (ENABLE_HLS_PROXY) {
+        streams.push({
+          name: `${siteName} (Relay)`,
+          title: `${site} • ${label} (Native Relay)`,
+          url: `${HLS_RELAY_URL}?url=${encodeURIComponent(directM3u8)}`,
+          behaviorHints: { notWebReady: true }
+        });
+      }
+      streams.push({
+        name: `${siteName} (Direct)`,
+        title: `${site} • ${label} (Direct HLS)`,
+        url: directM3u8,
+        behaviorHints: { notWebReady: true }
+      });
+    }
+
+    // Always keep the browser link as a reliable fallback
+    streams.push({
+      name: `${siteName} (Web)`,
+      title: `${site} • ${label} (Browser)`,
+      externalUrl: pageUrl
+    });
+  }
+
+  return { streams };
+});
 // ---------- server ----------
 
 const app = express();
