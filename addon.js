@@ -5,21 +5,31 @@ const express = require("express");
 // Scrapes an HTML page URL to automatically locate embedded .m3u8 links
 async function extractM3u8FromPage(pageUrl) {
     try {
+        console.log(`[Scraper] Fetching page: ${pageUrl}`);
         const response = await fetch(pageUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Referer': pageUrl
             }
         });
+        
+        if (!response.ok) {
+            console.log(`[Scraper] HTTP error ${response.status} for ${pageUrl}`);
+            return null;
+        }
+
         const html = await response.text();
 
         // Match standard m3u8 playlist URLs in scripts or attributes
         const m3u8Match = html.match(/(https?:[^\s"'<>]+?\.m3u8[^\s"'<>]*)/i);
         if (m3u8Match && m3u8Match[0]) {
+            console.log(`[Scraper] SUCCESS: Found .m3u8 -> ${m3u8Match[0]}`);
             return m3u8Match[0];
         }
+        
+        console.log(`[Scraper] NO MATCH found in HTML for ${pageUrl}`);
     } catch (err) {
-        console.error(`Failed to extract m3u8 from ${pageUrl}:`, err.message);
+        console.error(`[Scraper] Failed to extract m3u8 from ${pageUrl}:`, err.message);
     }
     return null;
 }
