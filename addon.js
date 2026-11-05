@@ -5,12 +5,13 @@ const express = require("express");
 // Scrapes an HTML page URL to automatically locate embedded .m3u8 links
 async function extractM3u8FromPage(pageUrl) {
     try {
-        console.log(`[Scraper] Fetching page: ${pageUrl}`);
+        console.log(`[Scraper] Fetching main page: ${pageUrl}`);
         const response = await fetch(pageUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Referer': pageUrl
-            }
+            },
+            redirect: 'follow'
         });
         
         if (!response.ok) {
@@ -20,21 +21,61 @@ async function extractM3u8FromPage(pageUrl) {
 
         const html = await response.text();
 
-        // Match standard m3u8 playlist URLs in scripts or attributes
-        const m3u8Match = html.match(/(https?:[^\s"'<>]+?\.m3u8[^\s"'<>]*)/i);
-        if (m3u8Match && m3u8Match[0]) {
-            console.log(`[Scraper] SUCCESS: Found .m3u8 -> ${m3u8Match[0]}`);
-            return m3u8Match[0];
+        // Helper helper to test any HTML string for a stream link
+        const findStreamInText = (text) => {
+            // 1. Direct .m3u8 match
+            const direct = text.match(/(https?:[^\s"'<>]+?\.m3u8[^\s"'<>]*)/i);
+            if (direct) return direct[1];
+
+            // 2. Player config variable match (file:, source:, url:, src:)
+            const config = text.match(/(?:file|source|url|src)\s*[:=]\s*["'](https?:[^"']+\.m3u8[^"']*)["']/i);
+            if (config) return config[1];
+
+            return null;
+        };
+
+        // Check main page first
+        let streamUrl = findStreamInText(html);
+        if (streamUrl) {
+            console.log(`[Scraper] SUCCESS (Main Page): Found -> ${streamUrl}`);
+            return streamUrl;
         }
-        
-        console.log(`[Scraper] NO MATCH found in HTML for ${pageUrl}`);
+
+        // 3. If not on main page, look for an embedded iframe player
+        const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+        if (iframeMatch && iframeMatch[1]) {
+            let iframeUrl = iframeMatch[1];
+            if (iframeUrl.startsWith('//')) iframeUrl = 'https:' + iframeUrl;
+            else if (iframeUrl.startsWith('/')) {
+                const parsedUrl = new URL(pageUrl);
+                iframeUrl = `${parsedUrl.protocol}//${parsedUrl.host}${iframeUrl}`;
+            }
+
+            console.log(`[Scraper] Checking embedded iframe: ${iframeUrl}`);
+            const iframeRes = await fetch(iframeUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Referer': pageUrl
+                },
+                redirect: 'follow'
+            });
+
+            if (iframeRes.ok) {
+                const iframeHtml = await iframeRes.text();
+                streamUrl = findStreamInText(iframeHtml);
+                if (streamUrl) {
+                    console.log(`[Scraper] SUCCESS (Iframe): Found -> ${streamUrl}`);
+                    return streamUrl;
+                }
+            }
+        }
+
+        console.log(`[Scraper] NO MATCH found on main page or iframes for ${pageUrl}`);
     } catch (err) {
-        console.error(`[Scraper] Failed to extract m3u8 from ${pageUrl}:`, err.message);
+        console.error(`[Scraper] Error during extraction for ${pageUrl}:`, err.message);
     }
     return null;
-}
-
-const API_BASE = "https://api.ppv.st/api";
+}const API_BASE = "https://api.ppv.st/api";
 const TIMEZONE = process.env.TZ_DISPLAY || "Australia/Sydney";
 const CACHE_MS = 60 * 1000;
 
