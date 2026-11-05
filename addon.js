@@ -307,3 +307,78 @@ async function findEvent(id) {
   const events = await fetchEvents();
   return events.find((e) => e.id === streamId) || null;
 }
+
+builder.defineMetaHandler(async ({ type, id }) => {
+  if (type !== "tv") return { meta: null };
+  if (id.startsWith("hls_")) {
+    const feed = findHlsFeed(id);
+    return feed ? { meta: hlsFeedToMeta(feed), cacheMaxAge: 300 } : { meta: null };
+  }
+  if (!id.startsWith("ppv_")) return { meta: null };
+  const ev = await findEvent(id);
+  if (!ev) return { meta: null };
+  return { meta: toMeta(ev), cacheMaxAge: 60 };
+});
+
+builder.defineStreamHandler(async ({ type, id }) => {
+  if (type !== "tv") return { streams: [] };
+  if (id.startsWith("hls_")) {
+    const feed = findHlsFeed(id);
+    return { streams: feed ? buildHlsStreamObject(feed.url, feed.name) : [] };
+  }
+  if (!id.startsWith("ppv_")) return { streams: [] };
+
+  // PPV events keep their web links; they never go through the HLS relay.
+  const ev = await findEvent(id);
+  if (!ev || !ev.uri_name) return { streams: [] };
+
+  const label = ev.source_tag || ev.tag || ev.name;
+  return {
+    streams: PPV_SITES.map((site, i) => ({
+      name: i === 0 ? "PPV" : "PPV Mirror",
+      title: `${site} • ${label}`,
+      externalUrl: `https://${site}/live/${ev.uri_name}`
+    }))
+  };
+});
+
+// ---------- server ----------
+
+const app = express();
+const addonInterface = builder.getInterface();
+
+app.set("trust proxy", true);
+
+app.get("/", (req, res) => {
+  const host = req.get("host");
+  const manifestUrl = `${req.protocol}://${host}/manifest.json`;
+  const installUrl = `stremio://${host}/manifest.json`;
+  res.type("html").send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${manifest.name}</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+       background:#0f0d1a;color:#eee;font-family:system-ui,sans-serif;padding:16px;box-sizing:border-box}
+  .card{max-width:440px;width:100%;background:#1b1830;border-radius:14px;padding:28px;text-align:center}
+  h1{margin:0 0 8px;font-size:24px}
+  p{color:#aaa;line-height:1.5}
+  a.btn{display:inline-block;margin:16px 0;padding:14px 28px;border-radius:10px;
+        background:#7b5bf5;color:#fff;text-decoration:none;font-weight:600}
+  code{display:block;word-break:break-all;background:#0f0d1a;padding:10px;border-radius:8px;
+       font-size:13px;user-select:all}
+</style></head><body><div class="card">
+  <h1>${manifest.name}</h1>
+  <p>${manifest.description}</p>
+  <a class="btn" href="${installUrl}">Install in Stremio</a>
+  <p>Or paste this into Stremio's add-on search bar<br>(use this on Firestick / TV):</p>
+  <code>${manifestUrl}</code>
+</div></body></html>`);
+});
+
+app.use(getRouter(addonInterface));
+
+const PORT = process.env.PORT || 7000;
+app.listen(PORT, () => {
+  console.log(`Add-on running on port ${PORT}`);
+});
