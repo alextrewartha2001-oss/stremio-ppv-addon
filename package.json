@@ -1,0 +1,17 @@
+{
+  "name": "stremio-ppv-addon",
+  "version": "1.0.0",
+  "description": "Stremio Addon for PPV.ST sports streams",
+  "main": "addon.js",
+  "scripts": {
+    "start": "node addon.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0",
+    "stremio-addon-sdk": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
