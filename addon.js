@@ -6,6 +6,14 @@ const API_BASE = "https://api.ppv.st/api";
 const TIMEZONE = process.env.TZ_DISPLAY || "Australia/Sydney";
 const CACHE_MS = 60 * 1000;
 
+// Official PPV domains. The first is the main link, the rest are listed as mirrors.
+// Override in Render with PPV_SITES=ppv.st,ppv.tj,...
+const PPV_SITES = (process.env.PPV_SITES ||
+  "ppv.st,ppv.tj,ppvs.pk,ppv.rw,ppv.ms,ppv.bi,ppv.ug")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 // Shown in Stremio's genre dropdown on the Discover page.
 const CATEGORIES = [
   "American Football",
@@ -22,7 +30,7 @@ const CATEGORIES = [
 
 const manifest = {
   id: "org.ppvst.sports",
-  version: "1.1.0",
+  version: "1.1.1",
   name: "PPV Sports Live",
   description: "Live sports streams and scheduled events provided by PPV.ST",
   resources: ["catalog", "meta", "stream"],
@@ -190,14 +198,13 @@ builder.defineStreamHandler(async ({ type, id }) => {
   const ev = await findEvent(id);
   if (!ev || !ev.uri_name) return { streams: [] };
 
+  const label = ev.source_tag || ev.tag || ev.name;
   return {
-    streams: [
-      {
-        name: "PPV",
-        title: `Watch on Web (${ev.source_tag || ev.tag || ev.name})`,
-        externalUrl: `https://ppv.land/watch/${ev.uri_name}`
-      }
-    ]
+    streams: PPV_SITES.map((site, i) => ({
+      name: i === 0 ? "PPV" : "PPV Mirror",
+      title: `${site} • ${label}`,
+      externalUrl: `https://${site}/live/${ev.uri_name}`
+    }))
   };
 });
 
